@@ -16,6 +16,8 @@ use rust_embed::RustEmbed;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+mod websocket_server;
+
 #[derive(RustEmbed)]
 #[folder = "init_template/"]
 struct Asset;
@@ -52,7 +54,7 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) {
     }
 }
 
-fn build() {
+fn build(dev: bool) {
     let dist_path = Path::new("dist");
     if dist_path.exists() {
         fs::remove_dir_all(dist_path).unwrap();
@@ -169,8 +171,35 @@ fn build() {
                     layout_template
                         .render(&mut layout_bytes, &layout_data)
                         .unwrap();
-                    let layout_rendered = std::str::from_utf8(&layout_bytes).unwrap();
-
+                    let mut layout_rendered =
+                        std::str::from_utf8(&layout_bytes).unwrap().to_string();
+                    if dev {
+                        let mut splitted = layout_rendered.split("</body>").collect::<Vec<&str>>();
+                        let mut st = splitted[0].to_owned();
+                        st += "<script>
+                            const connect = () => {
+                               
+                                    console.log('attempting to connect to websocket');
+                                    const socket = new WebSocket('ws://localhost:4242');
+                                    socket.onclose = () => {
+                                        console.log('socket closed attempt reconnect')
+                                        setTimeout(connect,1000)
+                                    }
+                                    socket.onerror = () => {
+                                        console.log('failed to connect to websocket');
+                                        setTimeout(connect,5000)
+                                    }
+                                    socket.addEventListener('message', (event) => {
+                                        window.location.reload();
+                                    });
+                              
+                              
+                            }
+                            connect();
+                        </script>";
+                        splitted[0] = &st;
+                        layout_rendered = splitted.join("</body>");
+                    }
                     let page_template = mustache::compile_str(&layout_rendered).unwrap();
                     let mut page_bytes = vec![];
                     let page_data = value.get(&page_name).unwrap_or(&HashMap::new()).to_owned();
@@ -211,7 +240,7 @@ fn watch() {
         .watch("src".as_ref(), RecursiveMode::Recursive)
         .unwrap();
 
-    build();
+    build(true);
     start_dev_server();
 
     for res in rx {
@@ -221,7 +250,7 @@ fn watch() {
                     println!("File changed, restarting");
                     processing = true;
                     thread::spawn(|| {
-                        build();
+                        build(true);
                         processing = false;
                     });
                 }
@@ -243,7 +272,7 @@ fn main() {
     match &cli.command {
         Commands::Dev => watch(),
         Commands::Build => {
-            build();
+            build(false);
         }
         Commands::New => {
             let input: String = Input::with_theme(&ColorfulTheme::default())
