@@ -281,7 +281,11 @@ fn start_dev_server() -> Child {
 
 fn refresh_refresher_token(token: Arc<Mutex<i32>>) {
     let mut t = token.lock().unwrap();
-    *t += 1;
+    if *t == 999999 {
+        *t = 0;
+    } else {
+        *t += 1;
+    }
 }
 
 fn main() {
