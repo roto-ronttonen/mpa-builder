@@ -1,12 +1,17 @@
 use std::{
+    collections::HashMap,
     fs,
-    path::Path,
+    hash::Hash,
+    path::{Path, PathBuf},
     process::{self, Command},
 };
 
 use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, Input};
+use glob::glob;
 use rust_embed::RustEmbed;
+use serde::Serialize;
+use serde_json::{Map, Value};
 
 #[derive(RustEmbed)]
 #[folder = "init_template/"]
@@ -27,15 +32,141 @@ enum Commands {
     New,
 }
 
+fn src_path_to_dist_path(p: &str) -> String {
+    p.replace("src/", "dist/")
+}
+
+fn build() {
+    let dist_path = Path::new("dist");
+    if dist_path.exists() {
+        fs::remove_dir_all(dist_path).unwrap();
+    }
+    fs::create_dir(dist_path).unwrap();
+    fs::create_dir_all(dist_path.join("styles")).unwrap();
+    fs::create_dir_all(dist_path.join("scripts")).unwrap();
+    fs::create_dir_all(dist_path.join("media")).unwrap();
+    run_command_and_wait(
+        "npx",
+        Some(vec![
+            "tailwindcss",
+            "-i",
+            "./src/styles/tailwind.css",
+            "-o",
+            "./dist/styles/tailwind.css",
+        ]),
+        None,
+    );
+    for entry in glob("src/scripts/**/*.js").unwrap() {
+        match entry {
+            Ok(path) => {
+                let path_str = path.to_str().unwrap();
+                run_command_and_wait(
+                    "npx",
+                    Some(vec![
+                        "rollup",
+                        &path_str,
+                        "--file",
+                        &src_path_to_dist_path(path_str),
+                        "--format",
+                        "iife",
+                    ]),
+                    None,
+                )
+            }
+            Err(_) => panic!("failed to read script"),
+        }
+    }
+
+    for entry in glob("src/styles/**/*.css").unwrap() {
+        match entry {
+            Ok(path) => {
+                let path_str = path.to_str().unwrap();
+                if !path_str.ends_with("tailwind.css") {
+                    fs::copy(path_str, src_path_to_dist_path(path_str)).unwrap();
+                }
+            }
+            Err(_) => panic!("failed to read style"),
+        }
+    }
+
+    let mut intl_map: HashMap<String, HashMap<String, HashMap<String, String>>> = HashMap::new();
+
+    for entry in glob("src/intl/**/*.json").unwrap() {
+        match entry {
+            Ok(path) => {
+                let path_str = path.to_str().unwrap();
+                let mut map = HashMap::new();
+                let content = fs::read_to_string(&path).unwrap();
+                map = serde_json::from_str(&content).unwrap();
+                if path_str.ends_with("_default.json") {
+                    intl_map.insert("default".to_string(), map.clone());
+                }
+                let normalized_path = path_str.replace("_default.json", ".json");
+                let splitted_path = normalized_path.split("/").collect::<Vec<&str>>();
+
+                let lang = splitted_path.last().unwrap();
+                intl_map.insert(lang.to_string(), map.clone());
+            }
+            Err(_) => panic!("failed to read intl"),
+        }
+    }
+
+    let layout_html = fs::read_to_string("src/layout.html").unwrap();
+    for entry in glob("src/pages/**/*.html").unwrap() {
+        match entry {
+            Ok(path) => {
+                let path_str = path.to_str().unwrap();
+                let splitted_path = path_str.split("/").collect::<Vec<&str>>();
+                let page_name = splitted_path.last().unwrap().replace(".html", "to");
+                let page_content = fs::read_to_string(path_str).unwrap();
+                for (key, value) in intl_map.clone().into_iter() {
+                    /* Magic keys are: title */
+                    #[derive(Serialize)]
+                    struct LayoutData {
+                        title: String,
+                        content: String,
+                    }
+                    let title_map = value.get("title").unwrap_or(&HashMap::new()).to_owned();
+
+                    let layout_data = LayoutData {
+                        title: title_map
+                            .get(&page_name.to_owned())
+                            .unwrap_or(&"".to_string())
+                            .to_owned(),
+                        content: page_content.clone(),
+                    };
+                    let layout_template = mustache::compile_str(&layout_html).unwrap();
+                    let mut layout_bytes = vec![];
+                    layout_template
+                        .render(&mut layout_bytes, &layout_data)
+                        .unwrap();
+                    let layout_rendered = std::str::from_utf8(&layout_bytes).unwrap();
+
+                    let page_template = mustache::compile_str(&layout_rendered).unwrap();
+                    let mut page_bytes = vec![];
+                    let page_data = value.get(&page_name).unwrap_or(&HashMap::new()).to_owned();
+                    page_template.render(&mut page_bytes, &page_data).unwrap();
+                    let mut path = dist_path.to_owned();
+                    if key == "default" {
+                        path = path.join(format!("{page_name}.html"));
+                    } else {
+                        path = path.join(key).join(format!("{page_name}.html"));
+                    }
+                    fs::write(path, std::str::from_utf8(&page_bytes).unwrap()).unwrap();
+                }
+            }
+            Err(_) => panic!("failed to read page"),
+        }
+    }
+}
+
 fn main() {
     let cli = Cli::parse();
     match &cli.command {
         Commands::Dev => {
-            println!("TODO")
+            build();
         }
-        Commands::Build => {
-            println!("TODO")
-        }
+        Commands::Build => {}
         Commands::New => {
             let input: String = Input::with_theme(&ColorfulTheme::default())
                 .with_prompt("Output directory")
@@ -73,9 +204,16 @@ fn main() {
             run_command_and_wait("npm", Some(vec!["init", "-y"]), Some(&input));
             run_command_and_wait(
                 "npm",
-                Some(vec!["install", "--save-dev", "typescript", "tailwindcss"]),
+                Some(vec!["install", "--save-dev", "tailwindcss", "rollup"]),
                 Some(&input),
             );
+            run_command_and_wait("npm", Some(vec!["install", "lodash"]), Some(&input));
+            run_command_and_wait("npx", Some(vec!["tailwindcss", "init"]), Some(&input));
+            fs::write(
+                Path::new(&input).join("tailwind.config.js"),
+                asset_to_string("tailwind.config.js"),
+            )
+            .unwrap();
         }
     }
 }
