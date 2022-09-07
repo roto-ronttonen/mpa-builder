@@ -159,14 +159,18 @@ fn build(dev: bool) {
                         title: String,
                         content: String,
                     }
-                    let mut layout_map = value["layout"]
+                    let layout_map = value
+                        .get("layout")
+                        .unwrap_or(&Value::Object(Map::new()))
                         .as_object()
                         .unwrap_or(&Map::new())
                         .to_owned();
 
                     let mut layout_data = Map::new();
                     layout_data.insert("content".to_string(), page_content.clone().into());
-                    let shared_layout_translations = layout_map["shared"]
+                    let shared_layout_translations = layout_map
+                        .get("shared")
+                        .unwrap_or(&Value::Object(Map::new()))
                         .as_object()
                         .unwrap_or(&Map::new())
                         .to_owned();
@@ -174,7 +178,9 @@ fn build(dev: bool) {
                     for (key, value) in shared_layout_translations {
                         layout_data.insert(key, value);
                     }
-                    let page_layout_translations = layout_map[&page_name]
+                    let page_layout_translations = layout_map
+                        .get(&page_name)
+                        .unwrap_or(&Value::Object(Map::new()))
                         .as_object()
                         .unwrap_or(&Map::new())
                         .to_owned();
