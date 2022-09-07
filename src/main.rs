@@ -1,10 +1,13 @@
 use std::{
     collections::HashMap,
-    fs,
+    fs::{self, File},
     hash::Hash,
     path::{Path, PathBuf},
     process::{self, Child, Command},
-    sync::mpsc::{Receiver, Sender},
+    sync::{
+        mpsc::{Receiver, Sender},
+        Arc, Mutex,
+    },
     thread,
 };
 
@@ -12,11 +15,12 @@ use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, Input};
 use glob::glob;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use refresh_server::start_refresh_server;
 use rust_embed::RustEmbed;
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-mod websocket_server;
+mod refresh_server;
 
 #[derive(RustEmbed)]
 #[folder = "init_template/"]
@@ -177,25 +181,20 @@ fn build(dev: bool) {
                         let mut splitted = layout_rendered.split("</body>").collect::<Vec<&str>>();
                         let mut st = splitted[0].to_owned();
                         st += "<script>
-                            const connect = () => {
-                               
-                                    console.log('attempting to connect to websocket');
-                                    const socket = new WebSocket('ws://localhost:4242');
-                                    socket.onclose = () => {
-                                        console.log('socket closed attempt reconnect')
-                                        setTimeout(connect,1000)
-                                    }
-                                    socket.onerror = () => {
-                                        console.log('failed to connect to websocket');
-                                        setTimeout(connect,5000)
-                                    }
-                                    socket.addEventListener('message', (event) => {
+                            let token = sessionStorage.getItem('refresherToken');
+                            const refresher = async () => {
+                                try {
+                                    const res = await fetch('localhost:4242')
+                                    const t = await res.text()
+                                    if (t !== token) {
+                                        sessionStorage.setItem('refresherToken', t);
                                         window.location.reload();
-                                    });
-                              
-                              
+                                    }
+                                } finally {
+                                    setTimeout(refresher,500);
+                                }
                             }
-                            connect();
+                            refresher()
                         </script>";
                         splitted[0] = &st;
                         layout_rendered = splitted.join("</body>");
@@ -225,9 +224,9 @@ fn build(dev: bool) {
     }
 }
 
-static mut processing: bool = false;
+// static mut processing: bool = false;
 
-fn watch() {
+fn watch(refresher_token: Arc<Mutex<i32>>) {
     let (tx, rx) = std::sync::mpsc::channel();
 
     // Automatically select the best implementation for your platform.
@@ -242,16 +241,26 @@ fn watch() {
 
     build(true);
     start_dev_server();
-
+    let processing = Arc::new(Mutex::new(false));
     for res in rx {
         match res {
             Ok(event) => unsafe {
-                if !processing {
+                let processing_handle = processing.clone();
+                let mut curr_processing = false;
+                {
+                    curr_processing = *processing_handle.lock().unwrap();
+                }
+                if !curr_processing {
+                    let processing_handle_thread = processing.clone();
+                    {
+                        *processing_handle.lock().unwrap() = true;
+                    }
                     println!("File changed, restarting");
-                    processing = true;
-                    thread::spawn(|| {
+                    let r_token = refresher_token.clone();
+                    thread::spawn(move || {
                         build(true);
-                        processing = false;
+                        refresh_refresher_token(r_token);
+                        *processing_handle_thread.lock().unwrap() = false;
                     });
                 }
             },
@@ -267,10 +276,19 @@ fn start_dev_server() -> Child {
         .unwrap()
 }
 
+fn refresh_refresher_token(token: Arc<Mutex<i32>>) {
+    let mut t = token.lock().unwrap();
+    *t += 1;
+}
+
 fn main() {
+    let refresher_token = Arc::new(Mutex::new(0));
     let cli = Cli::parse();
     match &cli.command {
-        Commands::Dev => watch(),
+        Commands::Dev => {
+            watch(refresher_token.clone());
+            start_refresh_server(refresher_token.clone());
+        }
         Commands::Build => {
             build(false);
         }
@@ -332,6 +350,13 @@ fn main() {
                 asset_to_string("tailwind.config.js"),
             )
             .unwrap();
+            let node_version_file = File::create(Path::new(&input).join(".node-version")).unwrap();
+            let mut node_version_cmd = Command::new("node")
+                .args(vec!["--version"])
+                .stdout(node_version_file)
+                .spawn()
+                .unwrap();
+            node_version_cmd.wait().unwrap();
         }
     }
 }
