@@ -1,2 +1,4 @@
 cargo build --release
-sudo cp target/release/mpa-builder /usr/local/bin/mpa
+mkdir ~/.tools
+cp target/release/mpa-builder ~/.tools/mpa
+echo "Add export PATH=~/.tools:\$PATH to path"
