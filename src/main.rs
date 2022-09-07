@@ -82,27 +82,25 @@ fn build(dev: bool) {
     let scripts_p = Path::new("src/scripts");
     if scripts_p.exists() {
         println!("Generating js");
+        let mut args = vec!["esbuild".to_string()];
         for entry in glob("src/scripts/**/*.js").unwrap() {
             match entry {
                 Ok(path) => {
                     let path_str = path.to_str().unwrap();
-                    run_command_and_wait(
-                        "npx",
-                        Some(vec![
-                            "esbuild",
-                            &path_str,
-                            &format!("--outfile={}", &src_path_to_dist_path(path_str)),
-                            "--bundle",
-                            "--minify",
-                            "--target=chrome58,firefox57,safari11,edge16",
-                            "--external:../node_modules/*",
-                        ]),
-                        None,
-                    )
+                    args.push(path_str.to_string());
                 }
                 Err(_) => panic!("failed to read script"),
             }
         }
+        let mut rest = vec![
+            format!("--outdir={}", &dist_path.join("scripts").to_str().unwrap()),
+            "--bundle".to_string(),
+            "--minify".to_string(),
+            "--target=chrome58,firefox57,safari11,edge16".to_string(),
+            "--external:../node_modules/*".to_string(),
+        ];
+        args.append(&mut rest);
+        run_command_and_wait("npx", Some(args.iter().map(AsRef::as_ref).collect()), None)
     }
 
     println!("Generating css");
