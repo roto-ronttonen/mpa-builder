@@ -1,3 +1,4 @@
 import { set } from "lodash";
-
-set({}, "asd.asd", "asd");
+const t = {};
+set(t, "asd.asd", "asd");
+console.log(t);

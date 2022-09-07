@@ -4,3 +4,9 @@
 
 `(cd test && cargo run --manifest-path ../Cargo.toml -- build)`. Run build command
 `(cd test && cargo run --manifest-path ../Cargo.toml -- dev)`. Run dev command
+
+# Usage
+
+uses mustache for templating
+
+(use {{{variable}}} ton not esacpe html)
