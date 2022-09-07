@@ -1,0 +1,12 @@
+{
+  "title": {
+    "index": "Tervetuloa",
+    "about": "Meistä"
+  },
+  "index": {
+    "header": "Moi"
+  },
+  "about": {
+    "header": "Moimoi"
+  }
+}

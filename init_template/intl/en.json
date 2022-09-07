@@ -1,0 +1,12 @@
+{
+  "title": {
+    "index": "Welcome",
+    "about": "About us"
+  },
+  "index": {
+    "header": "Hello"
+  },
+  "about": {
+    "header": "Howdy"
+  }
+}
