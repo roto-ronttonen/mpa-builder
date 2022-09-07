@@ -116,9 +116,9 @@ fn build(dev: bool) {
         }
     }
 
-    let mut intl_map: HashMap<String, HashMap<String, HashMap<String, String>>> = HashMap::new();
+    let mut intl_map: Map<String, Value> = Map::new();
     // Always have default intl incase translations are not used
-    intl_map.insert("default".to_string(), HashMap::new());
+    intl_map.insert("default".to_string(), Value::Object(Map::new()));
     let intl_p = Path::new("src/intl");
     if intl_p.exists() {
         println!("Generating translations");
@@ -126,17 +126,17 @@ fn build(dev: bool) {
             match entry {
                 Ok(path) => {
                     let path_str = path.to_str().unwrap();
-                    let mut map = HashMap::new();
+                    let mut map = Map::new();
                     let content = fs::read_to_string(&path).unwrap();
                     map = serde_json::from_str(&content).unwrap();
                     if path_str.ends_with("_default.json") {
-                        intl_map.insert("default".to_string(), map.clone());
+                        intl_map.insert("default".to_string(), Value::Object(map.clone()));
                     }
                     let normalized_path = path_str.replace("_default.json", ".json");
                     let splitted_path = normalized_path.split("/").collect::<Vec<&str>>();
 
                     let lang = splitted_path.last().unwrap().replace(".json", "");
-                    intl_map.insert(lang.to_string(), map.clone());
+                    intl_map.insert(lang.to_string(), Value::Object(map.clone()));
                 }
                 Err(_) => panic!("failed to read intl"),
             }
@@ -159,15 +159,28 @@ fn build(dev: bool) {
                         title: String,
                         content: String,
                     }
-                    let title_map = value.get("title").unwrap_or(&HashMap::new()).to_owned();
+                    let mut layout_map = value["layout"]
+                        .as_object()
+                        .unwrap_or(&Map::new())
+                        .to_owned();
 
-                    let layout_data = LayoutData {
-                        title: title_map
-                            .get(&page_name.to_owned())
-                            .unwrap_or(&"".to_string())
-                            .to_owned(),
-                        content: page_content.clone(),
-                    };
+                    let mut layout_data = Map::new();
+                    layout_data.insert("content".to_string(), page_content.clone().into());
+                    let shared_layout_translations = layout_map["shared"]
+                        .as_object()
+                        .unwrap_or(&Map::new())
+                        .to_owned();
+
+                    for (key, value) in shared_layout_translations {
+                        layout_data.insert(key, value);
+                    }
+                    let page_layout_translations = layout_map[&page_name]
+                        .as_object()
+                        .unwrap_or(&Map::new())
+                        .to_owned();
+                    for (key, value) in page_layout_translations {
+                        layout_data.insert(key, value);
+                    }
                     let layout_template = mustache::compile_str(&layout_html).unwrap();
                     let mut layout_bytes = vec![];
                     layout_template
@@ -202,7 +215,10 @@ fn build(dev: bool) {
                     }
                     let page_template = mustache::compile_str(&layout_rendered).unwrap();
                     let mut page_bytes = vec![];
-                    let page_data = value.get(&page_name).unwrap_or(&HashMap::new()).to_owned();
+                    let page_data = value
+                        .get(&page_name)
+                        .unwrap_or(&Value::Object(Map::new()))
+                        .to_owned();
                     page_template.render(&mut page_bytes, &page_data).unwrap();
                     let mut path = dist_path.to_owned();
                     if key != "default" {

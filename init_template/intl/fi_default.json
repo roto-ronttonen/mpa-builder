@@ -1,7 +1,14 @@
 {
-  "title": {
-    "index": "Tervetuloa",
-    "about": "Meistä"
+  "layout": {
+    "index": {
+      "title": "Tervetuloa"
+    },
+    "about": {
+      "title": "Meistä"
+    },
+    "shared": {
+      "footerText": "Jaettu footer text layoutissa"
+    }
   },
   "index": {
     "header": "Moi"

@@ -1,7 +1,14 @@
 {
-  "title": {
-    "index": "Welcome",
-    "about": "About us"
+  "layout": {
+    "index": {
+      "title": "Welcome"
+    },
+    "about": {
+      "title": "About us"
+    },
+    "shared": {
+      "footerText": "This is a shared footer text in layout"
+    }
   },
   "index": {
     "header": "Hello"
