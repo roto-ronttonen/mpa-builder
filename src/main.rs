@@ -182,9 +182,12 @@ fn build(dev: bool) {
                         let mut st = splitted[0].to_owned();
                         st += "<script>
                             let token = sessionStorage.getItem('refresherToken');
+                            if (token === null) {
+                                token = '0'
+                            }
                             const refresher = async () => {
                                 try {
-                                    const res = await fetch('localhost:4242')
+                                    const res = await fetch('http://localhost:4242')
                                     const t = await res.text()
                                     if (t !== token) {
                                         sessionStorage.setItem('refresherToken', t);
@@ -286,8 +289,13 @@ fn main() {
     let cli = Cli::parse();
     match &cli.command {
         Commands::Dev => {
-            watch(refresher_token.clone());
+            let watch_thread_token = refresher_token.clone();
+            let watch_thread = thread::spawn(move || {
+                watch(watch_thread_token);
+            });
+
             start_refresh_server(refresher_token.clone());
+            watch_thread.join().unwrap();
         }
         Commands::Build => {
             build(false);
