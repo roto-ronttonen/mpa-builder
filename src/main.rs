@@ -245,6 +245,18 @@ fn build(dev: bool) {
         println!("generating media");
         copy_dir_all("src/media", "dist/media");
     }
+    let favicon_p = Path::new("src/favicon.ico");
+    if favicon_p.exists() {
+        fs::copy(
+            favicon_p,
+            src_path_to_dist_path(favicon_p.to_str().unwrap()),
+        )
+        .unwrap();
+    }
+    let robots_p = Path::new("src/robots.txt");
+    if robots_p.exists() {
+        fs::copy(robots_p, src_path_to_dist_path(robots_p.to_str().unwrap())).unwrap();
+    }
 }
 
 // static mut processing: bool = false;
