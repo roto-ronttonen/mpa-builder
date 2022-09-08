@@ -9,6 +9,7 @@
       "description": "Meistä sivun kuvaus"
     },
     "shared": {
+      "lang": "fi",
       "footerText": "Jaettu footer text layoutissa"
     }
   },

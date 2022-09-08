@@ -9,6 +9,7 @@
       "description": "This is a description for about"
     },
     "shared": {
+      "lang": "en",
       "footerText": "This is a shared footer text in layout"
     }
   },
