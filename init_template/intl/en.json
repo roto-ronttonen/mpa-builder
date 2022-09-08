@@ -1,10 +1,12 @@
 {
   "layout": {
     "index": {
-      "title": "Welcome"
+      "title": "Welcome",
+      "description": "This is a description for home"
     },
     "about": {
-      "title": "About us"
+      "title": "About us",
+      "description": "This is a description for about"
     },
     "shared": {
       "footerText": "This is a shared footer text in layout"

@@ -1,10 +1,12 @@
 {
   "layout": {
     "index": {
-      "title": "Tervetuloa"
+      "title": "Tervetuloa",
+      "description": "Etusivun kuvaus"
     },
     "about": {
-      "title": "Meistä"
+      "title": "Meistä",
+      "description": "Meistä sivun kuvaus"
     },
     "shared": {
       "footerText": "Jaettu footer text layoutissa"
