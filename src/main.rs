@@ -401,6 +401,7 @@ fn main() {
                 .spawn()
                 .unwrap();
             node_version_cmd.wait().unwrap();
+            fs::write(Path::new(&input).join(".gitignore"), "node_modules\ndist").unwrap();
         }
     }
 }
