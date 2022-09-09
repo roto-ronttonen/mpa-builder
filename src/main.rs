@@ -1,5 +1,6 @@
 use std::{
     collections::HashMap,
+    fmt::format,
     fs::{self, File},
     hash::Hash,
     path::{Path, PathBuf},
@@ -15,10 +16,12 @@ use clap::{Parser, Subcommand};
 use dialoguer::{theme::ColorfulTheme, Input};
 use glob::glob;
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
+use rand::distributions::{Alphanumeric, DistString};
 use refresh_server::start_refresh_server;
 use rust_embed::RustEmbed;
 use serde::Serialize;
 use serde_json::{Map, Value};
+use walkdir::WalkDir;
 
 mod refresh_server;
 
@@ -58,6 +61,48 @@ fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) {
     }
 }
 
+fn filename_from_path(path: &PathBuf) -> String {
+    let path_str = path.to_str().unwrap();
+    path_str.split("/").last().unwrap().to_string()
+}
+
+fn path_replace_filename(path: &PathBuf, to: &String) -> String {
+    let s = path.to_str().unwrap();
+    let filename = filename_from_path(&path);
+    let t = to.as_str();
+    let r = s.replace(&filename, t);
+    r
+}
+
+fn create_dir_for_file(path: &PathBuf) {
+    let str = path.to_str().unwrap();
+    let mut splitted = str.split("/").collect::<Vec<&str>>();
+    splitted.pop();
+
+    fs::create_dir_all(splitted.join("/")).unwrap();
+}
+
+// Key is filepath, Value is filename with hash added
+fn path_to_hash(m: &mut HashMap<String, String>, path: &PathBuf) {
+    let filename = filename_from_path(&path);
+    let splitted = filename.split(".").collect::<Vec<&str>>();
+    let hash = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
+    m.insert(
+        path.to_str().unwrap().to_string(),
+        format!("{}.{}.{}", splitted[0], hash, splitted[1]),
+    );
+}
+
+fn file_to_hashed(path: &PathBuf, hashes: &HashMap<String, String>) {
+    let pathname = path.to_str().unwrap();
+    let dist_path = src_path_to_dist_path(pathname);
+
+    let hash = hashes.get(pathname).unwrap();
+    let p = Path::new(&dist_path).to_path_buf();
+    let path_with_hash = path_replace_filename(&p, hash);
+    fs::rename(dist_path, path_with_hash).unwrap();
+}
+
 fn build(dev: bool) {
     let dist_path = Path::new("dist");
     if dist_path.exists() {
@@ -67,6 +112,7 @@ fn build(dev: bool) {
     fs::create_dir_all(dist_path.join("styles")).unwrap();
     fs::create_dir_all(dist_path.join("scripts")).unwrap();
     fs::create_dir_all(dist_path.join("media")).unwrap();
+    let tailwindhash = Alphanumeric.sample_string(&mut rand::thread_rng(), 16);
     println!("Generating tailwind");
     run_command_and_wait(
         "npx",
@@ -75,10 +121,12 @@ fn build(dev: bool) {
             "-i",
             "./src/styles/tailwind.css",
             "-o",
-            "./dist/styles/tailwind.css",
+            &format!("./dist/styles/tailwind.{tailwindhash}.css"),
         ]),
         None,
     );
+
+    let mut js_hashes = HashMap::new();
     let scripts_p = Path::new("src/scripts");
     if scripts_p.exists() {
         println!("Generating js");
@@ -86,6 +134,7 @@ fn build(dev: bool) {
         for entry in glob("src/scripts/**/*.js").unwrap() {
             match entry {
                 Ok(path) => {
+                    path_to_hash(&mut js_hashes, &path);
                     let path_str = path.to_str().unwrap();
                     args.push(path_str.to_string());
                 }
@@ -100,19 +149,40 @@ fn build(dev: bool) {
             "--external:../node_modules/*".to_string(),
         ];
         args.append(&mut rest);
-        run_command_and_wait("npx", Some(args.iter().map(AsRef::as_ref).collect()), None)
+        run_command_and_wait("npx", Some(args.iter().map(AsRef::as_ref).collect()), None);
+        // change dist names to hashed names
+        for entry in glob("src/scripts/**/*.js").unwrap() {
+            match entry {
+                Ok(path) => {
+                    file_to_hashed(&path, &js_hashes);
+                }
+                Err(_) => panic!("failed to read script"),
+            }
+        }
     }
 
+    let mut css_hashes = HashMap::new();
     println!("Generating css");
     for entry in glob("src/styles/**/*.css").unwrap() {
         match entry {
             Ok(path) => {
+                path_to_hash(&mut css_hashes, &path);
                 let path_str = path.to_str().unwrap();
                 if !path_str.ends_with("tailwind.css") {
-                    fs::copy(path_str, src_path_to_dist_path(path_str)).unwrap();
+                    create_dir_for_file(&path);
+                    fs::copy(&path, src_path_to_dist_path(path_str)).unwrap();
                 }
             }
             Err(_) => panic!("failed to read style"),
+        }
+    }
+    // change dist names to hashed names
+    for entry in glob("src/styles/**/*.js").unwrap() {
+        match entry {
+            Ok(path) => {
+                file_to_hashed(&path, &css_hashes);
+            }
+            Err(_) => panic!("failed to read script"),
         }
     }
 
@@ -141,6 +211,50 @@ fn build(dev: bool) {
                 Err(_) => panic!("failed to read intl"),
             }
         }
+    }
+
+    let media_p = Path::new("src/media");
+    let mut media_hashes = HashMap::new();
+    if media_p.exists() {
+        println!("generating media");
+        for entry in WalkDir::new("src/media") {
+            match entry {
+                Ok(entry) => {
+                    if entry.file_type().is_file() {
+                        let path = entry.path().to_path_buf();
+                        let pathname = path.to_str().unwrap();
+                        path_to_hash(&mut media_hashes, &path);
+                        create_dir_for_file(&path);
+                        fs::copy(&path, src_path_to_dist_path(pathname)).unwrap();
+                    }
+                }
+                Err(_) => panic!("failed to read script"),
+            }
+        }
+
+        // change dist names to hashed names
+        for entry in WalkDir::new("src/media") {
+            match entry {
+                Ok(entry) => {
+                    if entry.file_type().is_file() {
+                        file_to_hashed(&entry.path().to_path_buf(), &media_hashes);
+                    }
+                }
+                Err(_) => panic!("failed to read script"),
+            }
+        }
+    }
+    let favicon_p = Path::new("src/favicon.ico");
+    if favicon_p.exists() {
+        fs::copy(
+            favicon_p,
+            src_path_to_dist_path(favicon_p.to_str().unwrap()),
+        )
+        .unwrap();
+    }
+    let robots_p = Path::new("src/robots.txt");
+    if robots_p.exists() {
+        fs::copy(robots_p, src_path_to_dist_path(robots_p.to_str().unwrap())).unwrap();
     }
 
     println!("Generating html");
@@ -226,6 +340,50 @@ fn build(dev: bool) {
                         .unwrap_or(&Value::Object(Map::new()))
                         .to_owned();
                     page_template.render(&mut page_bytes, &page_data).unwrap();
+                    let mut page_str = std::str::from_utf8(&page_bytes).unwrap().to_string();
+                    // Replace all imports with hashed import
+                    for (key, value) in js_hashes.iter() {
+                        let path = Path::new(&key).to_path_buf();
+                        let filename = filename_from_path(&path);
+                        // This might cause problems some day by replacing some text also, but whatever
+                        let from1 = format!(r#"{}""#, filename);
+                        let to1 = format!(r#"{}""#, value);
+                        let from2 = format!(r#"{}>"#, filename);
+                        let to2 = format!(r#"{}>"#, value);
+                        let from3 = format!(r#"{}/>"#, filename);
+                        let to3 = format!(r#"{}/>"#, value);
+                        page_str = page_str.replace(&from1, &to1);
+                        page_str = page_str.replace(&from2, &to2);
+                        page_str = page_str.replace(&from3, &to3);
+                    }
+                    for (key, value) in css_hashes.iter() {
+                        let path = Path::new(&key).to_path_buf();
+                        let filename = filename_from_path(&path);
+                        // This might cause problems some day by replacing some text also, but whatever
+                        let from1 = format!(r#"{}""#, filename);
+                        let to1 = format!(r#"{}""#, value);
+                        let from2 = format!(r#"{}>"#, filename);
+                        let to2 = format!(r#"{}>"#, value);
+                        let from3 = format!(r#"{}/>"#, filename);
+                        let to3 = format!(r#"{}/>"#, value);
+                        page_str = page_str.replace(&from1, &to1);
+                        page_str = page_str.replace(&from2, &to2);
+                        page_str = page_str.replace(&from3, &to3);
+                    }
+                    for (key, value) in media_hashes.iter() {
+                        let path = Path::new(&key).to_path_buf();
+                        let filename = filename_from_path(&path);
+                        // This might cause problems some day by replacing some text also, but whatever
+                        let from1 = format!(r#"{}""#, filename);
+                        let to1 = format!(r#"{}""#, value);
+                        let from2 = format!(r#"{}>"#, filename);
+                        let to2 = format!(r#"{}>"#, value);
+                        let from3 = format!(r#"{}/>"#, filename);
+                        let to3 = format!(r#"{}/>"#, value);
+                        page_str = page_str.replace(&from1, &to1);
+                        page_str = page_str.replace(&from2, &to2);
+                        page_str = page_str.replace(&from3, &to3);
+                    }
                     let mut path = dist_path.to_owned();
                     if key != "default" {
                         path = path.join(key);
@@ -233,29 +391,11 @@ fn build(dev: bool) {
                     }
                     path = path.join(format!("{page_name}.html"));
 
-                    fs::write(path, std::str::from_utf8(&page_bytes).unwrap()).unwrap();
+                    fs::write(path, page_str).unwrap();
                 }
             }
             Err(_) => panic!("failed to read page"),
         }
-    }
-
-    let media_p = Path::new("src/media");
-    if media_p.exists() {
-        println!("generating media");
-        copy_dir_all("src/media", "dist/media");
-    }
-    let favicon_p = Path::new("src/favicon.ico");
-    if favicon_p.exists() {
-        fs::copy(
-            favicon_p,
-            src_path_to_dist_path(favicon_p.to_str().unwrap()),
-        )
-        .unwrap();
-    }
-    let robots_p = Path::new("src/robots.txt");
-    if robots_p.exists() {
-        fs::copy(robots_p, src_path_to_dist_path(robots_p.to_str().unwrap())).unwrap();
     }
 }
 
