@@ -166,11 +166,16 @@ fn build(dev: bool) {
     for entry in glob("src/styles/**/*.css").unwrap() {
         match entry {
             Ok(path) => {
-                path_to_hash(&mut css_hashes, &path);
                 let path_str = path.to_str().unwrap();
                 if !path_str.ends_with("tailwind.css") {
+                    path_to_hash(&mut css_hashes, &path);
                     create_dir_for_file(&path);
                     fs::copy(&path, src_path_to_dist_path(path_str)).unwrap();
+                } else {
+                    css_hashes.insert(
+                        "src/styles/tailwind.css".to_string(),
+                        format!("tailwind.{tailwindhash}.css"),
+                    );
                 }
             }
             Err(_) => panic!("failed to read style"),
