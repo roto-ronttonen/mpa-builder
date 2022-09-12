@@ -10,3 +10,5 @@
 uses mustache for templating
 
 (use {{{variable}}} ton not esacpe html)
+
+You need nodejs to use this
